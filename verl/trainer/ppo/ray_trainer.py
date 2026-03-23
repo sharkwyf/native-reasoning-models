@@ -2,6 +2,9 @@
 # Copyright 2023-2024 SGLang Team
 # Copyright 2025 ModelBest Inc. and/or its affiliates
 #
+# Copyright 2026 Yuanfu Wang
+# Modified by Yuanfu Wang (Shanghai Artificial Intelligence)
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -513,10 +516,11 @@ class RayPPOTrainer:
 
     def _get_gen_batch(self, batch: DataProto) -> DataProto:
         reward_model_keys = set({"data_source", "reward_model", "extra_info", "uid"}) & batch.non_tensor_batch.keys()
+        nrt_reward_keys = set({"think_prefix", "response_prefix", "reference_content"}) & batch.non_tensor_batch.keys()
 
         # pop those keys for generation
         batch_keys_to_pop = ["input_ids", "attention_mask", "position_ids"]
-        non_tensor_batch_keys_to_pop = set(batch.non_tensor_batch.keys()) - reward_model_keys
+        non_tensor_batch_keys_to_pop = set(batch.non_tensor_batch.keys()) - reward_model_keys - nrt_reward_keys
         gen_batch = batch.pop(
             batch_keys=batch_keys_to_pop,
             non_tensor_batch_keys=list(non_tensor_batch_keys_to_pop),

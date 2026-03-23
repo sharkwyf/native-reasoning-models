@@ -1,5 +1,8 @@
 # Copyright 2025 Bytedance Ltd. and/or its affiliates
 #
+# Copyright 2026 Yuanfu Wang
+# Modified by Yuanfu Wang (Shanghai Artificial Intelligence)
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -126,6 +129,10 @@ class RolloutConfig(BaseConfig):
     top_p: float = 1.0
     do_sample: bool = True
     n: int = 1
+    max_tokens: int = 512
+    stop: Optional[list] = None
+    detokenize: bool = False
+    skip_special_tokens: bool = True
 
     # Early termination threshold for multi-turn rollout in sglang.
     # Abort remaining requests when (1 - over_sample_rate) * total_requests are completed.

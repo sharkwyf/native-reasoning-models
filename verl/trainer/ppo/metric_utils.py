@@ -1,4 +1,6 @@
 # Copyright 2024 Bytedance Ltd. and/or its affiliates
+# Copyright 2026 Yuanfu Wang
+# Modified by Yuanfu Wang (Shanghai Artificial Intelligence)
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -75,6 +77,80 @@ def _compute_response_info(batch: DataProto) -> dict[str, Any]:
         prompt_length=prompt_length,
         response_length=response_length,
     )
+
+
+def compute_nrt_metrics(batch: DataProto, use_critic: bool = True) -> dict[str, Any]:
+    """
+    Computes NRT metrics for PPO training.
+
+    This function calculates metrics related to NRT rewards, including raw, clipped, normalized, and trace rewards.
+    It provides statistical information (mean, max, min) for each metric category.
+
+    Args:
+        batch: A DataProto object containing batch data with NRT rewards and masks.
+        use_critic: Whether to include critic-specific metrics. Defaults to True.
+
+    Returns:
+        A dictionary of metrics including:
+            - nrt_reward/raw_trace_reward/mean, max, min: Statistics about raw trace rewards
+            - nrt_reward/raw_token_reward/mean, max, min: Statistics about raw token rewards
+            - nrt_reward/clipped_trace_reward/mean, max, min: Statistics about clipped trace rewards
+            - nrt_reward/clipped_token_reward/mean, max, min: Statistics about clipped token rewards
+            - nrt_reward/normalized_trace_reward/mean, max, min: Statistics about normalized trace rewards
+            - nrt_reward/normalized_token_reward/mean, max, min: Statistics about normalized token rewards
+            - nrt_reward/trace_reward/mean, max, min: Statistics about trace rewards
+            - nrt_reward/token_reward/mean, max, min: Statistics about token rewards
+            - nrt_reward/is_clipped/mean: Statistics about whether rewards are clipped
+    """
+    think_content_mask = batch.batch["think_content_masks"]
+    reference_content_mask = batch.batch["reference_content_masks"]
+
+    raw_trace_reward = batch.batch["raw_trace_reward"]
+    raw_token_reward = batch.batch["raw_token_reward"][reference_content_mask == 1]
+
+    centered_trace_reward = batch.batch["centered_trace_reward"]
+    centered_token_reward = batch.batch["centered_token_reward"][reference_content_mask == 1]
+
+    scaled_trace_reward = batch.batch["scaled_trace_reward"]
+    scaled_token_reward = batch.batch["scaled_token_reward"][reference_content_mask == 1]
+
+    trace_reward = batch.batch["trace_reward"]
+    token_reward = batch.batch["token_reward"][reference_content_mask == 1]
+
+    think_content_length = think_content_mask.sum(-1).float()
+    is_response_prefix_matched = batch.batch["is_response_prefix_matched"].float()
+
+    metrics = {
+        "nrt_reward/is_response_prefix_matched/mean": torch.mean(is_response_prefix_matched).detach().item(),
+        "nrt_reward/think_content_length/mean": torch.mean(think_content_length).detach().item(),
+        "nrt_reward/think_content_length/max": torch.max(think_content_length).detach().item(),
+        "nrt_reward/think_content_length/min": torch.min(think_content_length).detach().item(),
+
+        "nrt_reward/trace_reward/mean": torch.mean(trace_reward).detach().item(),
+        "nrt_reward/trace_reward/max": torch.max(trace_reward).detach().item(),
+        "nrt_reward/trace_reward/min": torch.min(trace_reward).detach().item(),
+        "nrt_reward/raw_trace_reward/mean": torch.mean(raw_trace_reward).detach().item(),
+        "nrt_reward/raw_trace_reward/max": torch.max(raw_trace_reward).detach().item(),
+        "nrt_reward/raw_trace_reward/min": torch.min(raw_trace_reward).detach().item(),
+        "nrt_reward/scaled_trace_reward/mean": torch.mean(scaled_trace_reward).detach().item(),
+        "nrt_reward/scaled_trace_reward/max": torch.max(scaled_trace_reward).detach().item(),
+        "nrt_reward/scaled_trace_reward/min": torch.min(scaled_trace_reward).detach().item(),
+
+        "nrt_reward/token_reward/mean": torch.mean(token_reward).detach().item(),
+        "nrt_reward/token_reward/max": torch.max(token_reward).detach().item(),
+        "nrt_reward/token_reward/min": torch.min(token_reward).detach().item(),
+        "nrt_reward/raw_token_reward/mean": torch.mean(raw_token_reward).detach().item(),
+        "nrt_reward/raw_token_reward/max": torch.max(raw_token_reward).detach().item(),
+        "nrt_reward/raw_token_reward/min": torch.min(raw_token_reward).detach().item(),
+        "nrt_reward/centered_token_reward/mean": torch.mean(centered_token_reward).detach().item(),
+        "nrt_reward/centered_token_reward/max": torch.max(centered_token_reward).detach().item(),
+        "nrt_reward/centered_token_reward/min": torch.min(centered_token_reward).detach().item(),
+        "nrt_reward/scaled_token_reward/mean": torch.mean(scaled_token_reward).detach().item(),
+        "nrt_reward/scaled_token_reward/max": torch.max(scaled_token_reward).detach().item(),
+        "nrt_reward/scaled_token_reward/min": torch.min(scaled_token_reward).detach().item(),
+    }
+
+    return metrics
 
 
 def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> dict[str, Any]:

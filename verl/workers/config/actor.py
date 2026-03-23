@@ -1,5 +1,8 @@
 # Copyright 2024 Bytedance Ltd. and/or its affiliates
 #
+# Copyright 2026 Yuanfu Wang
+# Modified by Yuanfu Wang (Shanghai Artificial Intelligence)
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -147,6 +150,12 @@ class ActorConfig(BaseConfig):
     use_torch_compile: bool = True
     kl_loss_coef: float = 0.001
     kl_loss_type: str = "low_var_kl"
+    use_nrt_loss: bool = True
+    trace_loss_coef: float = 1.0
+    response_prefix_loss_coef: float = 1.0
+    token_loss_coef: float = 1.0
+    cispo_clip_ratio_low: float = 0.0
+    cispo_clip_ratio_high: float = 10.0
     ppo_epochs: int = 1
     shuffle: bool = False
     data_loader_seed: int = 1

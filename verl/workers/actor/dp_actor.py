@@ -2,6 +2,9 @@
 # Copyright 2023-2024 SGLang Team
 # Copyright 2025 ModelBest Inc. and/or its affiliates
 #
+# Copyright 2026 Yuanfu Wang
+# Modified by Yuanfu Wang (Shanghai Artificial Intelligence)
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -330,6 +333,7 @@ class DataParallelPPOActor(BasePPOActor):
                 self.actor_optimizer.zero_grad()
             else:
                 self.actor_optimizer.step()
+
         return grad_norm
 
     @GPUMemoryLogger(role="dp actor", logger=logger)
@@ -419,6 +423,20 @@ class DataParallelPPOActor(BasePPOActor):
         # Include rollout_log_probs for computing rollout_corr metrics in bypass mode
         if "rollout_log_probs" in data.batch.keys():
             select_keys.append("rollout_log_probs")
+        # if self.config.tis_imp_ratio_cap > 0:
+        #     assert "rollout_log_probs" in data.batch.keys(), (
+        #         "Truncated Importance Sampling (TIS) requires to configure "
+        #         "`actor_rollout_ref.rollout.calculate_log_probs=True` "
+        #         "and is not currently supported in Server mode (agent loop)."
+        #     )
+        #     select_keys.append("rollout_log_probs")
+        if self.config.use_nrt_loss:
+            select_keys.append("think_content_masks")
+            select_keys.append("response_prefix_masks")
+            select_keys.append("reference_content_masks")
+            select_keys.append("trace_reward")
+            select_keys.append("token_reward")
+            select_keys.append("is_response_prefix_matched")
 
         has_multi_modal_inputs = "multi_modal_inputs" in data.non_tensor_batch.keys()
         non_tensor_select_keys = ["multi_modal_inputs"] if has_multi_modal_inputs else []
@@ -532,6 +550,47 @@ class DataParallelPPOActor(BasePPOActor):
                         policy_loss = policy_loss + kl_loss * self.config.kl_loss_coef
                         micro_batch_metrics["actor/kl_loss"] = kl_loss.detach().item() * loss_scale_factor
                         micro_batch_metrics["actor/kl_coef"] = self.config.kl_loss_coef
+
+                    # NRT
+                    if self.config.use_nrt_loss:
+                        think_content_masks = model_inputs["think_content_masks"]
+                        response_prefix_masks = model_inputs["response_prefix_masks"]
+                        reference_content_masks = model_inputs["reference_content_masks"]
+                        trace_reward = model_inputs["trace_reward"]
+                        token_reward = model_inputs["token_reward"]
+                        is_response_prefix_matched = model_inputs["is_response_prefix_matched"]
+
+                        nrt_loss_fn = get_policy_loss_fn("nrt")
+                        trace_loss, response_prefix_loss, token_loss, reference_loss = nrt_loss_fn(
+                            old_log_prob=old_log_prob,
+                            log_prob=log_prob,
+                            think_content_masks=think_content_masks,
+                            response_prefix_masks=response_prefix_masks,
+                            reference_content_masks=reference_content_masks,
+                            trace_reward=trace_reward,
+                            token_reward=token_reward,
+                            is_response_prefix_matched=is_response_prefix_matched,
+                            loss_agg_mode=loss_agg_mode,
+                            config=self.config,
+                            rollout_log_probs=None,
+                        )
+
+                        nrt_loss = self.config.trace_loss_coef * trace_loss \
+                            + self.config.response_prefix_loss_coef * response_prefix_loss \
+                            + self.config.token_loss_coef * token_loss
+                        policy_loss = nrt_loss
+                        micro_batch_metrics.update(
+                            {
+                                "actor/nrt_loss": nrt_loss.detach().item(),
+                                "actor/nrt_trace_loss_coef": self.config.trace_loss_coef,
+                                "actor/nrt_trace_loss": trace_loss.detach().item(),
+                                "actor/nrt_response_prefix_loss_coef": self.config.response_prefix_loss_coef,
+                                "actor/nrt_response_prefix_loss": response_prefix_loss.detach().item(),
+                                "actor/nrt_token_loss_coef": self.config.token_loss_coef,
+                                "actor/nrt_token_loss": token_loss.detach().item(),
+                                "actor/nrt_reference_loss": reference_loss.detach().item(),
+                            }
+                        )
 
                     if self.config.use_dynamic_bsz:
                         # relative to the dynamic bsz

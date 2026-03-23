@@ -1,3 +1,121 @@
+# Native Reasoning Models: Training Language Models to Reason on Unverifiable Data
+
+<div align="center">
+<a href="https://arxiv.org/abs/2602.11549"><img src="https://img.shields.io/static/v1?label=arXiv&message=Abstract&color=red" alt="arXiv Abstract"></a>
+<a href="https://arxiv.org/pdf/2602.11549"><img src="https://img.shields.io/static/v1?label=arXiv&message=PDF&color=green" alt="arXiv PDF"></a>
+</div>
+
+This repository provides an open-source NRT-style training recipe built on top of [`verl`](https://github.com/volcengine/verl/commit/0b376962) (Apache-2.0).
+
+Implementation notes:
+- This repo is based on a later `verl` update than the one referenced in the paper, so some details may differ.
+- We do not plan to release the earlier (paper-era) codebase, as it is outdated.
+
+## Requirements
+- Python >= 3.10
+- CUDA >= 12.8
+- GPU resources depend on your base model size and rollout backend (vLLM is used by the provided NRT runner).
+
+For general `verl` installation guidance, see `verl` docs: `docs/start/install.rst`.
+
+## Quickstart
+The minimal flow is:
+1. Prepare `<|response_start|>` in your base model.
+2. (Optional) Preprocess your dataset to parquet.
+3. Run NRT training.
+
+### 1) Add `<|response_start|>` token to the base model
+Use:
+```bash
+python3 recipe/nrt/add_response_start_token_to_model.py \
+  --model_path /path/to/base_model \
+  --output_path /path/to/base_model_with_response_start
+```
+
+### 2) Prepare parquet
+Use the provided Tulu-3 SFT mixture preprocessing:
+```bash
+python3 recipe/nrt/data/scripts/tulu-3-sft-mixture.py \
+  --input_dir /path/to/raw_parquet_dir \
+  --output_dir ./recipe/nrt/data/processed/tulu-3-sft-mixture-processed \
+  --train_size 220000 \
+  --test_size 1024 \
+  --num_proc 100
+```
+
+Note: the script expects parquet files under `--input_dir/data/*.parquet` (see the script defaults/usage).
+
+### 3) Train
+This repo provides a runnable example. The snippet below shows the key training arguments (full details are in `recipe/nrt/run_example_log_prob.sh`):
+```bash
+# Edit these:
+export MODEL_PATH=/path/to/base_model_with_response_start
+export MLP_WORKER_GPU=8
+export MLP_WORKER_NUM=1
+export DATASET_NAME=tulu-3-sft-mixture-v1
+export REWARD_AGG_MODE=log_prob
+
+python3 -m recipe.nrt.main_nrt \
+  algorithm.adv_estimator=grpo \
+  data.train_files=recipe/nrt/data/processed/${DATASET_NAME}/train.parquet \
+  data.val_files=recipe/nrt/data/processed/${DATASET_NAME}/test.parquet \
+  actor_rollout_ref.model.path=${MODEL_PATH} \
+  actor_rollout_ref.actor.use_nrt_loss=true \
+  actor_rollout_ref.rollout.name=vllm \
+  algorithm.reward_agg_mode=${REWARD_AGG_MODE} \
+  trainer.n_gpus_per_node=${MLP_WORKER_GPU} \
+  trainer.nnodes=${MLP_WORKER_NUM} \
+  ...
+```
+
+If you prefer, you can also just run:
+```bash
+bash recipe/nrt/run_example_log_prob.sh
+```
+
+## Configuration
+Main trainer config:
+- `recipe/nrt/config/nrt_trainer.yaml`
+
+Key points:
+- `custom_reward_function.path` points to `recipe/nrt/reward_score.py`
+- `algorithm.reward_agg_mode` (e.g., `weighted_sum_log_prob`)
+- `algorithm.center_reward_by` / `algorithm.scale_reward_by`
+- `actor_rollout_ref.actor.use_nrt_loss` enables the NRT loss path
+
+## Code Overview (`recipe/nrt/`)
+- `recipe/nrt/add_response_start_token_to_model.py`: resize tokenizer embeddings and initialize `<|response_start|>` from `eos_token`
+- `recipe/nrt/main_nrt.py` / `recipe/nrt/nrt_ray_trainer.py`: training entry point and trainer logic
+- `recipe/nrt/reward_score.py`: reward/scoring used by NRT (`compute_score`)
+- `recipe/nrt/data/scripts/template.py`: conversation template used for preprocessing
+- `recipe/nrt/data/scripts/tulu-3-sft-mixture.py`: preprocess the dataset into training parquet
+- `recipe/nrt/run_example_log_prob.sh`: example training launcher
+
+## Results
+Please refer to the paper for training/evaluation results: [arXiv:2602.11549](https://arxiv.org/abs/2602.11549).
+
+## FAQ
+- This repo is based on a later verl update than the one referenced in the paper, so some details may differ.
+- For training stability, our main experiments set `use_fixed_token_reward=True`, which is different from the derived loss function in original paper.
+
+## License
+Apache License 2.0. This project keeps the upstream `verl` licensing terms. (This repository focuses on code; it does not include any training data/models under a separate license grant.)
+
+## How to Cite
+```bibtex
+@article{wang2026native,
+  title={Native Reasoning Models: Training Language Models to Reason on Unverifiable Data},
+  author={Wang, Yuanfu and Liu, Zhixuan and Li, Xiangtian and Lu, Chaochao and Yang, Chao},
+  journal={arXiv preprint arXiv:2602.11549},
+  year={2026}
+}
+```
+
+---
+
+<details>
+<summary>Preserved original verl README (upstream)</summary>
+
 <div align="center">
  👋 Hi, everyone!
     verl is a RL training library initiated by <b>ByteDance Seed team</b> and maintained by the verl community.
@@ -271,3 +389,5 @@ Founded in 2023, ByteDance Seed Team is dedicated to crafting the industry's mos
 ---
 
 We are HIRING! Send us an [email](mailto:the.verl.project@gmail.com) if you are interested in internship/FTE opportunities in RL for agents.
+
+</details>

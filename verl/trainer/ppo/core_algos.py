@@ -1,6 +1,9 @@
 # Copyright 2024 Bytedance Ltd. and/or its affiliates
 # Copyright 2022 The HuggingFace Team. All rights reserved.
 #
+# Copyright 2026 Yuanfu Wang
+# Modified by Yuanfu Wang (Shanghai Artificial Intelligence)
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -995,6 +998,74 @@ def compute_policy_loss_vanilla(
         "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(),
     }
     return pg_loss, pg_metrics
+
+
+@register_policy_loss("nrt")
+def compute_policy_loss_nrt(
+    old_log_prob: torch.Tensor,
+    log_prob: torch.Tensor,
+    think_content_masks: torch.Tensor,
+    response_prefix_masks: torch.Tensor,
+    reference_content_masks: torch.Tensor,
+    trace_reward: torch.Tensor,
+    token_reward: torch.Tensor,
+    is_response_prefix_matched: torch.Tensor,
+    loss_agg_mode: str = "token-mean",
+    config: Optional[DictConfig | AlgoConfig] = None,
+    rollout_log_probs: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    r"""
+    Compute the clipped policy objective and related metrics for NRT.
+
+    \begin{equation}
+    \label{eq:nrt_gradient}
+    \begin{split}
+        \nabla_\theta J(\theta) \approx \frac{1}{K} \sum_{k=1}^K r_k(\theta) \bigg( & \underbrace{R(z_k, \theta)}_{\text{Trace Reward}} \cdot \underbrace{\nabla_\theta \log \pi_\theta(z_k|x)}_{\text{Trace Policy Gradient}} \\
+        & + \sum_{i=1}^T \underbrace{\alpha_{i,k}(\theta) c_{i,k}(\theta)}_{\text{Token Reward Signal}} \cdot \underbrace{\nabla_\theta \log \pi_\theta(y^\star_i | x, y^\star_{<i}, z_k)}_{\text{Token Prediction Gradient}} \bigg),
+    \end{split}
+    \end{equation}
+    where $r_k(\theta)$ is the importance sampling ratio, $c_{i,k}(\theta)$ is the conditional probability of token $y^\star_i$, and $\alpha_{i,k}(\theta) = \frac{\partial f}{\partial c_i}$ is the reward function's sensitivity to $c_{i,k}(\theta)$.
+    """
+    # 0. Calculate importance sampling ratio
+    negative_approx_kl = log_prob - old_log_prob
+    is_ratio = torch.exp(negative_approx_kl)
+    is_ratio_clipped = torch.clamp(is_ratio, min=config.cispo_clip_ratio_low, max=config.cispo_clip_ratio_high)
+    is_ratio_clipped_sg = is_ratio_clipped.detach()
+
+    clip_ratio_low = config.clip_ratio_low if config.clip_ratio_low is not None else config.clip_ratio
+    clip_ratio_high = config.clip_ratio_high if config.clip_ratio_high is not None else config.clip_ratio
+
+    # In CISPO, the advantage Â_i,t is the trace_reward. The ratio r_i,t is the importance sampling ratio (is_ratio).
+    advantages = trace_reward.unsqueeze(-1)
+    cond1 = (advantages > 0) & (is_ratio > clip_ratio_high)
+    cond2 = (advantages < 0) & (is_ratio < clip_ratio_low)
+    mask = ~(cond1 | cond2)
+    
+    # 1. Trace Reward Component: R(z_k, θ) · ∇_θ log π_θ(z_k|x)
+    # Apply trace reward to the think content (trace z_k)
+    trace_policy_gradient = -trace_reward.unsqueeze(-1) * log_prob * is_ratio_clipped_sg
+    trace_loss_masks = (think_content_masks | response_prefix_masks) & mask
+    trace_loss = agg_loss(loss_mat=trace_policy_gradient, loss_mask=trace_loss_masks, loss_agg_mode=loss_agg_mode)
+    
+    # 2. SFT Loss Component: Standard language modeling loss on response prefix
+    # This is a standard cross-entropy loss for the response prefix
+    response_prefix_policy_gradient = -log_prob
+    response_prefix_loss_masks = response_prefix_masks & ~is_response_prefix_matched.unsqueeze(-1)
+    response_prefix_loss = agg_loss(loss_mat=response_prefix_policy_gradient, loss_mask=response_prefix_loss_masks, loss_agg_mode=loss_agg_mode)
+    
+    # 3. Token Reward Component: α_{i,k}(θ) c_{i,k}(θ) · ∇_θ log π_θ(y*_i | x, y*_{<i}, z_k)
+    # Apply token reward to the reference content (token y*_i)
+    # Note: Importance ratio will be added later at sequence level
+    token_policy_gradient = -token_reward * log_prob
+    token_loss_masks = reference_content_masks
+    token_loss = agg_loss(loss_mat=token_policy_gradient, loss_mask=token_loss_masks, loss_agg_mode=loss_agg_mode)
+
+    # 4. Reference Loss Component: Standard language modeling loss on reference content
+    reference_loss = agg_loss(loss_mat=-log_prob, loss_mask=reference_content_masks, loss_agg_mode=loss_agg_mode)
+
+    # breakpoint()
+    
+    return trace_loss, response_prefix_loss, token_loss, reference_loss
 
 
 @register_policy_loss("gspo")

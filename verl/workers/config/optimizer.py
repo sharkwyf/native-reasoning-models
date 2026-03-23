@@ -1,5 +1,8 @@
 # Copyright 2024 Bytedance Ltd. and/or its affiliates
 #
+# Copyright 2026 Yuanfu Wang
+# Modified by Yuanfu Wang (Shanghai Artificial Intelligence)
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -43,6 +46,7 @@ class OptimizerConfig(BaseConfig):
     lr_warmup_steps: Optional[int] = -1
     betas: tuple[float, float] = (0.9, 0.999)
     clip_grad: float = 1.0
+    eps: float = 1e-8
     # deprecate grad_clip
     grad_clip: Optional[float] = None
 
@@ -151,6 +155,7 @@ def build_optimizer(parameters, config: FSDPOptimizerConfig):
     optimizer_args = {
         "lr": config.lr,
         "weight_decay": config.weight_decay,
+        "eps": config.eps,
     }
 
     optimizer_name_lower = config.optimizer.lower()
