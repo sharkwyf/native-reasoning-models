@@ -53,7 +53,7 @@ export MODEL_PATH=/path/to/base_model_with_response_start
 export MLP_WORKER_GPU=8
 export MLP_WORKER_NUM=1
 export DATASET_NAME=tulu-3-sft-mixture-v1
-export REWARD_AGG_MODE=log_prob
+export REWARD_AGG_MODE=weighted_sum_log_prob
 
 python3 -m recipe.nrt.main_nrt \
   algorithm.adv_estimator=grpo \
